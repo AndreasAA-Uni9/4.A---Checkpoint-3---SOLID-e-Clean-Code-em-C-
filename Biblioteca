@@ -1,0 +1,204 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace BibliotecaApp
+{
+    // MODELOS
+    public class Livro
+    {
+        public string Titulo { get; set; }
+        public string Autor { get; set; }
+        public string ISBN { get; set; }
+        public bool Disponivel { get; set; } = true;
+    }
+
+    public class Usuario
+    {
+        public string Nome { get; set; }
+        public int ID { get; set; }
+    }
+
+    public class Emprestimo
+    {
+        public Livro Livro { get; set; }
+        public Usuario Usuario { get; set; }
+        public DateTime DataEmprestimo { get; set; }
+        public DateTime DataDevolucaoPrevista { get; set; }
+        public DateTime? DataDevolucaoEfetiva { get; set; }
+    }
+
+    // INTERFACES
+    public interface INotificador
+    {
+        void Enviar(string destinatario, string assunto, string mensagem);
+    }
+
+    public interface IMultaService
+    {
+        double CalcularMulta(DateTime dataDevolucaoPrevista, DateTime dataAtual);
+    }
+
+    // IMPLEMENTAÇÕES DE NOTIFICADORES
+    public class NotificadorEmail : INotificador
+    {
+        public void Enviar(string destinatario, string assunto, string mensagem)
+        {
+            Console.WriteLine($"[EMAIL] Para: {destinatario} | Assunto: {assunto} | Mensagem: {mensagem}");
+        }
+    }
+
+    public class NotificadorSMS : INotificador
+    {
+        public void Enviar(string destinatario, string assunto, string mensagem)
+        {
+            Console.WriteLine($"[SMS] Para: {destinatario} | {mensagem}");
+        }
+    }
+
+    // SERVIÇOS
+    public class LivroService
+    {
+        private readonly List<Livro> livros = new();
+
+        public void AdicionarLivro(string titulo, string autor, string isbn)
+        {
+            livros.Add(new Livro { Titulo = titulo, Autor = autor, ISBN = isbn });
+            Console.WriteLine("Livro adicionado: " + titulo);
+        }
+
+        public Livro BuscarPorISBN(string isbn) => livros.FirstOrDefault(l => l.ISBN == isbn);
+        public List<Livro> BuscarTodos() => livros;
+    }
+
+    public class UsuarioService
+    {
+        private readonly List<Usuario> usuarios = new();
+        private readonly INotificador notificador;
+
+        public UsuarioService(INotificador notificador)
+        {
+            this.notificador = notificador;
+        }
+
+        public void AdicionarUsuario(string nome, int id)
+        {
+            usuarios.Add(new Usuario { Nome = nome, ID = id });
+            notificador.Enviar(nome, "Bem-vindo à Biblioteca", "Você foi cadastrado em nosso sistema!");
+        }
+
+        public Usuario BuscarPorID(int id) => usuarios.FirstOrDefault(u => u.ID == id);
+        public List<Usuario> BuscarTodos() => usuarios;
+    }
+
+    public class MultaService : IMultaService
+    {
+        public double CalcularMulta(DateTime dataDevolucaoPrevista, DateTime dataAtual)
+        {
+            return dataAtual > dataDevolucaoPrevista
+                ? (dataAtual - dataDevolucaoPrevista).Days * 1.0
+                : 0.0;
+        }
+    }
+
+    public class EmprestimoService
+    {
+        private readonly List<Emprestimo> emprestimos = new();
+        private readonly LivroService livroService;
+        private readonly UsuarioService usuarioService;
+        private readonly IMultaService multaService;
+        private readonly List<INotificador> notificadores;
+
+        public EmprestimoService(LivroService livroService, UsuarioService usuarioService, IMultaService multaService, List<INotificador> notificadores)
+        {
+            this.livroService = livroService;
+            this.usuarioService = usuarioService;
+            this.multaService = multaService;
+            this.notificadores = notificadores;
+        }
+
+        public bool RealizarEmprestimo(int usuarioId, string isbn, int diasEmprestimo)
+        {
+            var livro = livroService.BuscarPorISBN(isbn);
+            var usuario = usuarioService.BuscarPorID(usuarioId);
+
+            if (livro == null || usuario == null || !livro.Disponivel)
+                return false;
+
+            livro.Disponivel = false;
+            emprestimos.Add(new Emprestimo
+            {
+                Livro = livro,
+                Usuario = usuario,
+                DataEmprestimo = DateTime.Now,
+                DataDevolucaoPrevista = DateTime.Now.AddDays(diasEmprestimo)
+            });
+
+            Notificar(usuario.Nome, "Empréstimo Realizado", $"Você pegou emprestado o livro: {livro.Titulo}");
+            return true;
+        }
+
+        public double RealizarDevolucao(string isbn, int usuarioId)
+        {
+            var emprestimo = emprestimos.FirstOrDefault(e => e.Livro.ISBN == isbn && e.Usuario.ID == usuarioId && e.DataDevolucaoEfetiva == null);
+
+            if (emprestimo == null) return -1;
+
+            emprestimo.DataDevolucaoEfetiva = DateTime.Now;
+            emprestimo.Livro.Disponivel = true;
+
+            double multa = multaService.CalcularMulta(emprestimo.DataDevolucaoPrevista, DateTime.Now);
+
+            if (multa > 0)
+            {
+                Notificar(emprestimo.Usuario.Nome, "Multa por Atraso", $"Você tem uma multa de R$ {multa}");
+            }
+
+            return multa;
+        }
+
+        public List<Emprestimo> BuscarTodos() => emprestimos;
+
+        private void Notificar(string destinatario, string assunto, string mensagem)
+        {
+            foreach (var notificador in notificadores)
+            {
+                notificador.Enviar(destinatario, assunto, mensagem);
+            }
+        }
+    }
+
+    // PROGRAMA PRINCIPAL
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var email = new NotificadorEmail();
+            var sms = new NotificadorSMS();
+
+            var livroService = new LivroService();
+            var usuarioService = new UsuarioService(email);
+            var multaService = new MultaService();
+
+            var notificadores = new List<INotificador> { email, sms };
+            var emprestimoService = new EmprestimoService(livroService, usuarioService, multaService, notificadores);
+
+            // Cadastro de livros
+            livroService.AdicionarLivro("Clean Code", "Robert C. Martin", "978-0132350884");
+            livroService.AdicionarLivro("Design Patterns", "Erich Gamma", "978-0201633610");
+
+            // Cadastro de usuários
+            usuarioService.AdicionarUsuario("João Silva", 1);
+            usuarioService.AdicionarUsuario("Maria Oliveira", 2);
+
+            // Empréstimo
+            emprestimoService.RealizarEmprestimo(1, "978-0132350884", 7);
+
+            // Devolução simulada
+            System.Threading.Thread.Sleep(1000); // apenas para simular tempo passado
+            double multa = emprestimoService.RealizarDevolucao("978-0132350884", 1);
+
+            Console.WriteLine($"Multa por atraso: R$ {multa}");
+        }
+    }
+}
