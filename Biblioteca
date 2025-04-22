@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace BibliotecaApp
 {
-    // MODELOS
     public class Livro
     {
         public string Titulo { get; set; }
@@ -27,186 +27,165 @@ namespace BibliotecaApp
         public DateTime DataDevolucaoPrevista { get; set; }
         public DateTime? DataDevolucaoEfetiva { get; set; }
     }
-
-    // INTERFACES
     public interface INotificador
     {
-        void Enviar(string destinatario, string assunto, string mensagem);
+        void Enviar(string destinatario, string mensagem);
     }
 
-    public interface IMultaService
+    public class EmailNotificador : INotificador
     {
-        double CalcularMulta(DateTime dataDevolucaoPrevista, DateTime dataAtual);
-    }
-
-    // IMPLEMENTAÇÕES DE NOTIFICADORES
-    public class NotificadorEmail : INotificador
-    {
-        public void Enviar(string destinatario, string assunto, string mensagem)
+        public void Enviar(string destinatario, string mensagem)
         {
-            Console.WriteLine($"[EMAIL] Para: {destinatario} | Assunto: {assunto} | Mensagem: {mensagem}");
+            Console.WriteLine($"[EMAIL] Para: {destinatario} | Mensagem: {mensagem}");
         }
     }
 
-    public class NotificadorSMS : INotificador
+    public class SmsNotificador : INotificador
     {
-        public void Enviar(string destinatario, string assunto, string mensagem)
+        public void Enviar(string destinatario, string mensagem)
         {
-            Console.WriteLine($"[SMS] Para: {destinatario} | {mensagem}");
+            Console.WriteLine($"[SMS] Para: {destinatario} | Mensagem: {mensagem}");
         }
     }
 
-    // SERVIÇOS
-public class LivroService
-{
-    private readonly List<Livro> livros = new();
-
-    public void AdicionarLivro(string titulo, string autor, string isbn)
+    public class ServicoNotificacao
     {
-        // Validação de dados
-        if (string.IsNullOrWhiteSpace(titulo))
-            throw new ArgumentException("O título do livro não pode ser vazio.");
-        if (string.IsNullOrWhiteSpace(autor))
-            throw new ArgumentException("O autor do livro não pode ser vazio.");
-        if (string.IsNullOrWhiteSpace(isbn))
-            throw new ArgumentException("O ISBN do livro não pode ser vazio.");
+        private readonly List<INotificador> notificadores;
 
-        if (livros.Any(l => l.ISBN == isbn))
-            throw new InvalidOperationException("Já existe um livro com este ISBN cadastrado.");
-
-        livros.Add(new Livro { Titulo = titulo, Autor = autor, ISBN = isbn });
-        Console.WriteLine("Livro adicionado: " + titulo);
-    }
-
-    public Livro BuscarPorISBN(string isbn)
-    {
-        if (string.IsNullOrWhiteSpace(isbn))
-            throw new ArgumentException("O ISBN não pode ser vazio.");
-
-        return livros.FirstOrDefault(l => l.ISBN == isbn);
-    }
-
-    public List<Livro> BuscarTodos() => livros;
-}
-
-public class UsuarioService
-{
-    private readonly List<Usuario> usuarios = new();
-    private readonly INotificador notificador;
-
-    public UsuarioService(INotificador notificador)
-    {
-        this.notificador = notificador;
-    }
-
-    public void AdicionarUsuario(string nome, int id)
-    {
-        // Validação de dados
-        if (string.IsNullOrWhiteSpace(nome))
-            throw new ArgumentException("O nome do usuário não pode ser vazio.");
-        if (id <= 0)
-            throw new ArgumentException("O ID do usuário deve ser maior que zero.");
-
-        if (usuarios.Any(u => u.ID == id))
-            throw new InvalidOperationException("Já existe um usuário com este ID cadastrado.");
-
-        usuarios.Add(new Usuario { Nome = nome, ID = id });
-        notificador.Enviar(nome, "Bem-vindo à Biblioteca", "Você foi cadastrado em nosso sistema!");
-    }
-
-    public Usuario BuscarPorID(int id)
-    {
-        if (id <= 0)
-            throw new ArgumentException("O ID do usuário deve ser maior que zero.");
-
-        return usuarios.FirstOrDefault(u => u.ID == id);
-    }
-
-    public List<Usuario> BuscarTodos() => usuarios;
-}
-
-public class EmprestimoService
-{
-    private readonly List<Emprestimo> emprestimos = new();
-    private readonly LivroService livroService;
-    private readonly UsuarioService usuarioService;
-    private readonly IMultaService multaService;
-    private readonly List<INotificador> notificadores;
-
-    public EmprestimoService(LivroService livroService, UsuarioService usuarioService, IMultaService multaService, List<INotificador> notificadores)
-    {
-        this.livroService = livroService;
-        this.usuarioService = usuarioService;
-        this.multaService = multaService;
-        this.notificadores = notificadores;
-    }
-
-    public bool RealizarEmprestimo(int usuarioId, string isbn, int diasEmprestimo)
-    {
-        // Validação de dados
-        if (usuarioId <= 0)
-            throw new ArgumentException("O ID do usuário deve ser maior que zero.");
-        if (string.IsNullOrWhiteSpace(isbn))
-            throw new ArgumentException("O ISBN não pode ser vazio.");
-        if (diasEmprestimo <= 0)
-            throw new ArgumentException("O número de dias de empréstimo deve ser maior que zero.");
-
-        var livro = livroService.BuscarPorISBN(isbn);
-        var usuario = usuarioService.BuscarPorID(usuarioId);
-
-        if (livro == null)
-            throw new InvalidOperationException("Livro não encontrado.");
-        if (usuario == null)
-            throw new InvalidOperationException("Usuário não encontrado.");
-        if (!livro.Disponivel)
-            throw new InvalidOperationException("O livro não está disponível para empréstimo.");
-
-        livro.Disponivel = false;
-        emprestimos.Add(new Emprestimo
+        public ServicoNotificacao(List<INotificador> notificadores)
         {
-            Livro = livro,
-            Usuario = usuario,
-            DataEmprestimo = DateTime.Now,
-            DataDevolucaoPrevista = DateTime.Now.AddDays(diasEmprestimo)
-        });
-
-        Notificar(usuario.Nome, "Empréstimo Realizado", $"Você pegou emprestado o livro: {livro.Titulo}");
-        return true;
-    }
-
-    public double RealizarDevolucao(string isbn, int usuarioId)
-    {
-        // Validação de dados
-        if (usuarioId <= 0)
-            throw new ArgumentException("O ID do usuário deve ser maior que zero.");
-        if (string.IsNullOrWhiteSpace(isbn))
-            throw new ArgumentException("O ISBN não pode ser vazio.");
-
-        var emprestimo = emprestimos.FirstOrDefault(e => e.Livro.ISBN == isbn && e.Usuario.ID == usuarioId && e.DataDevolucaoEfetiva == null);
-
-        if (emprestimo == null)
-            throw new InvalidOperationException("Empréstimo não encontrado ou já devolvido.");
-
-        emprestimo.DataDevolucaoEfetiva = DateTime.Now;
-        emprestimo.Livro.Disponivel = true;
-
-        double multa = multaService.CalcularMulta(emprestimo.DataDevolucaoPrevista, DateTime.Now);
-
-        if (multa > 0)
-        {
-            Notificar(emprestimo.Usuario.Nome, "Multa por Atraso", $"Você tem uma multa de R$ {multa}");
+            this.notificadores = notificadores;
         }
 
-        return multa;
-    }
-
-    public List<Emprestimo> BuscarTodos() => emprestimos;
-
-    private void Notificar(string destinatario, string assunto, string mensagem)
-    {
-        foreach (var notificador in notificadores)
+        public void Notificar(string destinatario, string mensagem)
         {
-            notificador.Enviar(destinatario, assunto, mensagem);
+            foreach (var notificador in notificadores)
+            {
+                notificador.Enviar(destinatario, mensagem);
+            }
+        }
+    }
+    public class CalculadoraMulta
+    {
+        private const double ValorPorDia = 1.0;
+
+        public double Calcular(Emprestimo emprestimo)
+        {
+            if (!emprestimo.DataDevolucaoEfetiva.HasValue ||
+                emprestimo.DataDevolucaoEfetiva <= emprestimo.DataDevolucaoPrevista)
+                return 0;
+
+            TimeSpan atraso = emprestimo.DataDevolucaoEfetiva.Value - emprestimo.DataDevolucaoPrevista;
+            return atraso.Days * ValorPorDia;
+        }
+    }
+    public class ServicoBiblioteca
+    {
+        private readonly List<Livro> livros = new();
+        private readonly List<Usuario> usuarios = new();
+        private readonly List<Emprestimo> emprestimos = new();
+
+        private readonly ServicoNotificacao notificacao;
+        private readonly CalculadoraMulta calculadoraMulta;
+
+        public ServicoBiblioteca(ServicoNotificacao notificacao, CalculadoraMulta calculadoraMulta)
+        {
+            this.notificacao = notificacao;
+            this.calculadoraMulta = calculadoraMulta;
+        }
+
+        public void AdicionarLivro(string titulo, string autor, string isbn)
+        {
+            livros.Add(new Livro { Titulo = titulo, Autor = autor, ISBN = isbn });
+        }
+
+        public void AdicionarUsuario(string nome, int id)
+        {
+            usuarios.Add(new Usuario { Nome = nome, ID = id });
+            notificacao.Notificar(nome, "Bem-vindo à Biblioteca! Você foi cadastrado.");
+        }
+
+        public bool RealizarEmprestimo(int usuarioId, string isbn, int dias)
+        {
+            var usuario = usuarios.FirstOrDefault(u => u.ID == usuarioId);
+            var livro = livros.FirstOrDefault(l => l.ISBN == isbn && l.Disponivel);
+
+            if (usuario == null || livro == null)
+                return false;
+
+            livro.Disponivel = false;
+
+            var emprestimo = new Emprestimo
+            {
+                Usuario = usuario,
+                Livro = livro,
+                DataEmprestimo = DateTime.Now,
+                DataDevolucaoPrevista = DateTime.Now.AddDays(dias)
+            };
+
+            emprestimos.Add(emprestimo);
+
+            notificacao.Notificar(usuario.Nome, $"Você pegou o livro: {livro.Titulo}");
+            return true;
+        }
+
+        public double RealizarDevolucao(string isbn, int usuarioId)
+        {
+            var emprestimo = emprestimos.FirstOrDefault(e =>
+                e.Livro.ISBN == isbn &&
+                e.Usuario.ID == usuarioId &&
+                e.DataDevolucaoEfetiva == null);
+
+            if (emprestimo == null)
+                return -1;
+
+            emprestimo.DataDevolucaoEfetiva = DateTime.Now;
+            emprestimo.Livro.Disponivel = true;
+
+            double multa = calculadoraMulta.Calcular(emprestimo);
+
+            if (multa > 0)
+                notificacao.Notificar(emprestimo.Usuario.Nome, $"Você tem uma multa de R$ {multa:0.00}");
+
+            return multa;
+        }
+
+        public List<Livro> ListarLivros() => livros;
+        public List<Usuario> ListarUsuarios() => usuarios;
+        public List<Emprestimo> ListarEmprestimos() => emprestimos;
+    }
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var notificadores = new List<INotificador>
+            {
+                new EmailNotificador(),
+                new SmsNotificador()
+            };
+
+            var servicoNotificacao = new ServicoNotificacao(notificadores);
+            var calculadoraMulta = new CalculadoraMulta();
+            var biblioteca = new ServicoBiblioteca(servicoNotificacao, calculadoraMulta);
+
+            // Cadastro inicial
+            biblioteca.AdicionarLivro("Clean Code", "Robert C. Martin", "978-0132350884");
+            biblioteca.AdicionarLivro("Design Patterns", "Erich Gamma", "978-0201633610");
+
+            biblioteca.AdicionarUsuario("João Silva", 1);
+            biblioteca.AdicionarUsuario("Maria Oliveira", 2);
+
+            // Empréstimo
+            biblioteca.RealizarEmprestimo(1, "978-0132350884", 7);
+
+            Console.WriteLine("Aguardando devolução...");
+            Thread.Sleep(2000); // Simula o tempo passando
+
+            // Devolução com atraso simulado
+            double multa = biblioteca.RealizarDevolucao("978-0132350884", 1);
+            Console.WriteLine($"Multa por atraso: R$ {multa:0.00}");
+
+            Console.ReadLine();
         }
     }
 }
